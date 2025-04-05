@@ -1,468 +1,412 @@
 
-import { useState, useEffect, useRef } from 'react';
-import { Play, Pause, RotateCcw, CheckCircle, Settings, Tag } from 'lucide-react';
-import { format } from 'date-fns';
+import { useState, useEffect } from 'react';
+import { useAppStore } from '@/store';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Play, Pause, RotateCcw, Settings as SettingsIcon, BarChart } from 'lucide-react';
+import { Progress } from '@/components/ui/progress';
 import { Slider } from '@/components/ui/slider';
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { Label } from '@/components/ui/label';
-import { Input } from '@/components/ui/input';
-import { useToast } from '@/hooks/use-toast';
-import { useAppStore } from '@/store';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { format, sub } from 'date-fns';
+import { FocusSession } from '@/types';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Separator } from '@/components/ui/separator';
 
 const FocusTimer = () => {
-  const {
-    pomodoroSettings,
+  const { 
+    isTimerRunning, 
+    setTimerRunning, 
+    pomodoroSettings, 
     updatePomodoroSettings,
-    addFocusSession,
     focusSessions,
-    isTimerRunning,
-    setTimerRunning,
+    addFocusSession,
+    themeMode
   } = useAppStore();
   
-  const { toast } = useToast();
-  
+  // Timer state
+  const [timerMode, setTimerMode] = useState<'focus' | 'break'>('focus');
   const [timeLeft, setTimeLeft] = useState(pomodoroSettings.focusDuration * 60);
-  const [mode, setMode] = useState<'focus' | 'break' | 'longBreak'>('focus');
-  const [sessionsCompleted, setSessionsCompleted] = useState(0);
-  const [sessionTag, setSessionTag] = useState('');
-  const [showSettings, setShowSettings] = useState(false);
+  const [currentSession, setCurrentSession] = useState(1);
   
-  const timerRef = useRef<number | null>(null);
-  const sessionStartTimeRef = useRef<Date | null>(null);
-  
-  // Set up the timer based on the mode
-  const setupTimer = (timerMode: 'focus' | 'break' | 'longBreak') => {
-    let duration = 0;
+  // Progress calculations
+  const totalSeconds = timerMode === 'focus' 
+    ? pomodoroSettings.focusDuration * 60 
+    : pomodoroSettings.breakDuration * 60;
     
-    switch (timerMode) {
-      case 'focus':
-        duration = pomodoroSettings.focusDuration * 60;
-        break;
-      case 'break':
-        duration = pomodoroSettings.breakDuration * 60;
-        break;
-      case 'longBreak':
-        duration = pomodoroSettings.longBreakDuration * 60;
-        break;
-    }
-    
-    setTimeLeft(duration);
-    setMode(timerMode);
-  };
+  const progressPercent = ((totalSeconds - timeLeft) / totalSeconds) * 100;
   
-  // Start the timer
-  const startTimer = () => {
-    if (!isTimerRunning) {
-      // If starting a new focus session, record the start time
-      if (mode === 'focus' && timeLeft === pomodoroSettings.focusDuration * 60) {
-        sessionStartTimeRef.current = new Date();
-      }
-      
-      setTimerRunning(true);
-    }
-  };
-  
-  // Pause the timer
-  const pauseTimer = () => {
-    setTimerRunning(false);
-  };
-  
-  // Reset the timer
-  const resetTimer = () => {
-    setTimerRunning(false);
-    setupTimer(mode);
-    sessionStartTimeRef.current = null;
-  };
-  
-  // Complete a session
-  const completeSession = () => {
-    if (mode === 'focus' && sessionStartTimeRef.current) {
-      const now = new Date();
-      const startTime = sessionStartTimeRef.current;
-      
-      // Add to focus sessions
-      addFocusSession({
-        date: format(now, 'yyyy-MM-dd'),
-        startTime: format(startTime, 'HH:mm:ss'),
-        endTime: format(now, 'HH:mm:ss'),
-        focusDuration: pomodoroSettings.focusDuration,
-        breakDuration: mode === 'break' ? pomodoroSettings.breakDuration : pomodoroSettings.longBreakDuration,
-        completedPomodoros: 1,
-        tag: sessionTag || undefined,
-      });
-      
-      // Show completion toast
-      toast({
-        title: 'Session completed!',
-        description: `You focused for ${pomodoroSettings.focusDuration} minutes.`,
-      });
-      
-      // Update sessions completed count
-      const newSessionsCompleted = sessionsCompleted + 1;
-      setSessionsCompleted(newSessionsCompleted);
-      
-      // Determine if we need a long break
-      if (newSessionsCompleted % pomodoroSettings.sessionsBeforeLongBreak === 0) {
-        setupTimer('longBreak');
-        toast({
-          title: 'Take a long break!',
-          description: `Time for a ${pomodoroSettings.longBreakDuration} minute break.`,
-        });
-      } else {
-        setupTimer('break');
-        toast({
-          title: 'Take a short break!',
-          description: `Time for a ${pomodoroSettings.breakDuration} minute break.`,
-        });
-      }
-      
-      // Reset session start time
-      sessionStartTimeRef.current = null;
-    } else if (mode === 'break' || mode === 'longBreak') {
-      setupTimer('focus');
-      toast({
-        title: 'Break completed!',
-        description: 'Ready to focus again?',
-      });
-    }
-  };
-  
-  // Format time as MM:SS
-  const formatTime = (seconds: number): string => {
+  // Timer settings form state
+  const [focusDuration, setFocusDuration] = useState(pomodoroSettings.focusDuration);
+  const [breakDuration, setBreakDuration] = useState(pomodoroSettings.breakDuration);
+  const [longBreakDuration, setLongBreakDuration] = useState(pomodoroSettings.longBreakDuration);
+  const [sessionsBeforeLongBreak, setSessionsBeforeLongBreak] = useState(pomodoroSettings.sessionsBeforeLongBreak);
+
+  // Format time for display
+  const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
   
-  // Calculate progress percentage
-  const calculateProgress = (): number => {
-    let totalSeconds = 0;
-    
-    switch (mode) {
-      case 'focus':
-        totalSeconds = pomodoroSettings.focusDuration * 60;
-        break;
-      case 'break':
-        totalSeconds = pomodoroSettings.breakDuration * 60;
-        break;
-      case 'longBreak':
-        totalSeconds = pomodoroSettings.longBreakDuration * 60;
-        break;
-    }
-    
-    return ((totalSeconds - timeLeft) / totalSeconds) * 100;
+  // Reset timer
+  const resetTimer = () => {
+    setTimerRunning(false);
+    setTimerMode('focus');
+    setTimeLeft(pomodoroSettings.focusDuration * 60);
+    setCurrentSession(1);
   };
   
-  // Get today's focus data
-  const getTodaysFocusData = () => {
-    const today = format(new Date(), 'yyyy-MM-dd');
-    const todaySessions = focusSessions.filter(session => session.date === today);
-    
-    const totalMinutes = todaySessions.reduce(
-      (total, session) => total + session.focusDuration * session.completedPomodoros,
-      0
-    );
-    
-    const sessionsCount = todaySessions.length;
-    
-    return { totalMinutes, sessionsCount };
+  // Save settings
+  const saveSettings = () => {
+    updatePomodoroSettings({
+      focusDuration,
+      breakDuration,
+      longBreakDuration,
+      sessionsBeforeLongBreak
+    });
+    // Reset timer with new settings
+    resetTimer();
+  };
+  
+  // Process session complete
+  const handleSessionComplete = () => {
+    // Record finished focus session
+    if (timerMode === 'focus') {
+      const newSession: Omit<FocusSession, 'id'> = {
+        date: new Date().toISOString(),
+        duration: pomodoroSettings.focusDuration, // Duration in minutes
+        type: 'focus',
+      };
+      addFocusSession(newSession);
+      
+      // Switch to break mode
+      if (currentSession % pomodoroSettings.sessionsBeforeLongBreak === 0) {
+        // Long break after completing required number of sessions
+        setTimerMode('break');
+        setTimeLeft(pomodoroSettings.longBreakDuration * 60);
+      } else {
+        // Regular break
+        setTimerMode('break');
+        setTimeLeft(pomodoroSettings.breakDuration * 60);
+      }
+    } else {
+      // Break finished, back to focus mode
+      setTimerMode('focus');
+      setTimeLeft(pomodoroSettings.focusDuration * 60);
+      setCurrentSession(currentSession + 1);
+    }
+  };
+  
+  // Start next session
+  const startNextSession = () => {
+    if (timerMode === 'break') {
+      // Skip break, start next focus session
+      setTimerMode('focus');
+      setTimeLeft(pomodoroSettings.focusDuration * 60);
+      setCurrentSession(currentSession + 1);
+    } else {
+      // Skip focus, start break
+      if (currentSession % pomodoroSettings.sessionsBeforeLongBreak === 0) {
+        setTimerMode('break');
+        setTimeLeft(pomodoroSettings.longBreakDuration * 60);
+      } else {
+        setTimerMode('break');
+        setTimeLeft(pomodoroSettings.breakDuration * 60);
+      }
+    }
+    setTimerRunning(false);
   };
   
   // Timer effect
   useEffect(() => {
-    if (isTimerRunning) {
-      timerRef.current = window.setInterval(() => {
-        setTimeLeft((prevTime) => {
-          if (prevTime <= 1) {
-            // Timer is done
-            clearInterval(timerRef.current!);
-            setTimerRunning(false);
-            completeSession();
-            return 0;
-          }
-          return prevTime - 1;
-        });
+    let timer: NodeJS.Timeout;
+    
+    if (isTimerRunning && timeLeft > 0) {
+      timer = setInterval(() => {
+        setTimeLeft(prev => prev - 1);
       }, 1000);
-    } else if (timerRef.current) {
-      clearInterval(timerRef.current);
+    } else if (isTimerRunning && timeLeft === 0) {
+      // Timer completed
+      setTimerRunning(false);
+      // Play sound or notification
+      handleSessionComplete();
     }
     
     return () => {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-      }
+      clearInterval(timer);
     };
-  }, [isTimerRunning]);
+  }, [isTimerRunning, timeLeft]);
   
-  // Initial timer setup
-  useEffect(() => {
-    setupTimer('focus');
-  }, [pomodoroSettings]);
-  
-  // Get today's focus data
-  const todaysFocus = getTodaysFocusData();
-  
-  return (
-    <div className="container mx-auto max-w-4xl py-6">
-      <h1 className="text-3xl font-bold mb-6">Focus Timer</h1>
+  // Generate session stats for the chart
+  const generateSessionStats = () => {
+    const last7Days = Array.from({ length: 7 }).map((_, i) => {
+      return format(sub(new Date(), { days: 6 - i }), 'EEE');
+    });
+    
+    const stats = last7Days.map(dayLabel => {
+      const day = format(sub(new Date(), { days: 6 - last7Days.indexOf(dayLabel) }), 'yyyy-MM-dd');
       
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="md:col-span-2">
-          <Card className="overflow-hidden">
-            <CardHeader className={`
-              ${mode === 'focus' ? 'bg-blue-500/10' : ''}
-              ${mode === 'break' ? 'bg-green-500/10' : ''}
-              ${mode === 'longBreak' ? 'bg-purple-500/10' : ''}
-            `}>
-              <CardTitle className="text-xl flex justify-center">
-                {mode === 'focus' && 'Focus Session'}
-                {mode === 'break' && 'Short Break'}
-                {mode === 'longBreak' && 'Long Break'}
-              </CardTitle>
-              <CardDescription className="text-center">
-                Session {sessionsCompleted + 1} • {sessionTag ? `Tag: ${sessionTag}` : 'No tag'}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="pt-6">
-              <div className="flex justify-center mb-6">
-                <div className="relative">
-                  <svg className="w-64 h-64">
-                    <circle
-                      className="text-muted/20 stroke-2"
-                      cx="128"
-                      cy="128"
-                      r="120"
-                      fill="none"
-                      strokeWidth="8"
-                      stroke="currentColor"
-                    />
-                    <circle
-                      className={`
-                        ${mode === 'focus' ? 'text-blue-500' : ''}
-                        ${mode === 'break' ? 'text-green-500' : ''}
-                        ${mode === 'longBreak' ? 'text-purple-500' : ''}
-                        stroke-2 transition-all duration-200
-                      `}
-                      cx="128"
-                      cy="128"
-                      r="120"
-                      fill="none"
-                      strokeWidth="8"
-                      stroke="currentColor"
-                      strokeDasharray={2 * Math.PI * 120}
-                      strokeDashoffset={
-                        2 * Math.PI * 120 * (1 - calculateProgress() / 100)
-                      }
-                      transform="rotate(-90 128 128)"
-                    />
-                  </svg>
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="text-5xl font-bold">{formatTime(timeLeft)}</div>
-                  </div>
-                </div>
-              </div>
-              
-              <div className="flex items-center justify-center space-x-4 mt-6">
-                {!isTimerRunning ? (
-                  <Button
-                    size="lg"
-                    className="w-16 h-16 rounded-full"
-                    onClick={startTimer}
-                  >
-                    <Play className="h-8 w-8" />
-                  </Button>
-                ) : (
-                  <Button
-                    size="lg"
-                    variant="outline"
-                    className="w-16 h-16 rounded-full"
-                    onClick={pauseTimer}
-                  >
-                    <Pause className="h-8 w-8" />
-                  </Button>
-                )}
-                <Button
-                  size="lg"
-                  variant="outline"
-                  className="w-12 h-12 rounded-full"
-                  onClick={resetTimer}
-                >
-                  <RotateCcw className="h-6 w-6" />
-                </Button>
-              </div>
-              
-              <div className="mt-6">
-                <div className="flex items-center space-x-2">
-                  <Tag className="h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Add a tag for this session"
-                    value={sessionTag}
-                    onChange={(e) => setSessionTag(e.target.value)}
-                    className="flex-1"
-                  />
-                </div>
-              </div>
-            </CardContent>
-            <CardFooter className="flex justify-between">
-              <Button variant="ghost" onClick={() => setShowSettings(!showSettings)}>
-                <Settings className="h-4 w-4 mr-2" />
-                Settings
-              </Button>
-              <Button variant="ghost" onClick={() => completeSession()}>
-                <CheckCircle className="h-4 w-4 mr-2" />
-                Skip
-              </Button>
-            </CardFooter>
-          </Card>
-          
-          {showSettings && (
-            <Card className="mt-6">
-              <CardHeader>
-                <CardTitle>Timer Settings</CardTitle>
-                <CardDescription>Customize your focus and break durations</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-6">
-                  <div className="space-y-2">
-                    <Label>Focus Duration: {pomodoroSettings.focusDuration} minutes</Label>
-                    <Slider
-                      value={[pomodoroSettings.focusDuration]}
-                      min={5}
-                      max={60}
-                      step={5}
-                      onValueChange={(value) => updatePomodoroSettings({ focusDuration: value[0] })}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Short Break: {pomodoroSettings.breakDuration} minutes</Label>
-                    <Slider
-                      value={[pomodoroSettings.breakDuration]}
-                      min={1}
-                      max={15}
-                      step={1}
-                      onValueChange={(value) => updatePomodoroSettings({ breakDuration: value[0] })}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Long Break: {pomodoroSettings.longBreakDuration} minutes</Label>
-                    <Slider
-                      value={[pomodoroSettings.longBreakDuration]}
-                      min={5}
-                      max={30}
-                      step={5}
-                      onValueChange={(value) => updatePomodoroSettings({ longBreakDuration: value[0] })}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Sessions before long break: {pomodoroSettings.sessionsBeforeLongBreak}</Label>
-                    <Slider
-                      value={[pomodoroSettings.sessionsBeforeLongBreak]}
-                      min={1}
-                      max={8}
-                      step={1}
-                      onValueChange={(value) => updatePomodoroSettings({ sessionsBeforeLongBreak: value[0] })}
-                    />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-        </div>
+      // Filter sessions for this day
+      const dayMinutes = focusSessions
+        .filter(session => session.date.startsWith(day))
+        .reduce((total, session) => total + session.duration, 0);
         
-        <div className="md:col-span-1">
-          <Card className="h-full">
-            <CardHeader>
-              <CardTitle>Today's Focus</CardTitle>
-              <CardDescription>
-                {format(new Date(), 'EEEE, MMMM d')}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="text-center p-4 rounded-lg bg-muted/20">
-                <h3 className="text-4xl font-bold text-primary mb-1">
-                  {todaysFocus.totalMinutes}
-                </h3>
-                <p className="text-muted-foreground">Minutes focused</p>
-              </div>
-              
-              <div className="text-center p-4 rounded-lg bg-muted/20">
-                <h3 className="text-4xl font-bold text-primary mb-1">
-                  {todaysFocus.sessionsCount}
-                </h3>
-                <p className="text-muted-foreground">Sessions completed</p>
-              </div>
-              
-              <div className="space-y-2">
-                <h3 className="font-medium">Recent Sessions</h3>
+      return {
+        day: dayLabel,
+        minutes: dayMinutes
+      };
+    });
+    
+    return stats;
+  };
+
+  return (
+    <div className="container max-w-4xl mx-auto py-6">
+      <div className="flex flex-col gap-6">
+        <div className="flex items-center justify-between">
+          <h1 className="text-3xl font-bold">Focus Timer</h1>
+          
+          <div className="flex items-center space-x-2">
+            <Sheet>
+              <SheetTrigger asChild>
+                <Button variant="outline" size="icon">
+                  <SettingsIcon className="h-5 w-5" />
+                </Button>
+              </SheetTrigger>
+              <SheetContent>
+                <SheetHeader>
+                  <SheetTitle>Timer Settings</SheetTitle>
+                  <SheetDescription>
+                    Customize your pomodoro timer settings
+                  </SheetDescription>
+                </SheetHeader>
                 
-                {focusSessions.length > 0 ? (
-                  <Tabs defaultValue="today">
-                    <TabsList className="w-full">
-                      <TabsTrigger value="today" className="flex-1">Today</TabsTrigger>
-                      <TabsTrigger value="all" className="flex-1">All</TabsTrigger>
+                <div className="space-y-6 py-6">
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between mb-1">
+                      <Label>Focus Duration: {focusDuration} min</Label>
+                      <span className="text-sm text-muted-foreground">{focusDuration} min</span>
+                    </div>
+                    <Slider
+                      min={1}
+                      max={60}
+                      step={1}
+                      value={[focusDuration]}
+                      onValueChange={(value) => setFocusDuration(value[0])}
+                    />
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between mb-1">
+                      <Label>Break Duration: {breakDuration} min</Label>
+                      <span className="text-sm text-muted-foreground">{breakDuration} min</span>
+                    </div>
+                    <Slider
+                      min={1}
+                      max={30}
+                      step={1}
+                      value={[breakDuration]}
+                      onValueChange={(value) => setBreakDuration(value[0])}
+                    />
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between mb-1">
+                      <Label>Long Break Duration: {longBreakDuration} min</Label>
+                      <span className="text-sm text-muted-foreground">{longBreakDuration} min</span>
+                    </div>
+                    <Slider
+                      min={1}
+                      max={60}
+                      step={1}
+                      value={[longBreakDuration]}
+                      onValueChange={(value) => setLongBreakDuration(value[0])}
+                    />
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between mb-1">
+                      <Label>Sessions Before Long Break: {sessionsBeforeLongBreak}</Label>
+                      <span className="text-sm text-muted-foreground">{sessionsBeforeLongBreak}</span>
+                    </div>
+                    <Slider
+                      min={1}
+                      max={10}
+                      step={1}
+                      value={[sessionsBeforeLongBreak]}
+                      onValueChange={(value) => setSessionsBeforeLongBreak(value[0])}
+                    />
+                  </div>
+                </div>
+                
+                <div className="flex justify-end space-x-2">
+                  <Button variant="outline" onClick={resetTimer}>Reset</Button>
+                  <Button onClick={saveSettings}>Save Settings</Button>
+                </div>
+              </SheetContent>
+            </Sheet>
+            
+            <Sheet>
+              <SheetTrigger asChild>
+                <Button variant="outline" size="icon">
+                  <BarChart className="h-5 w-5" />
+                </Button>
+              </SheetTrigger>
+              <SheetContent>
+                <SheetHeader>
+                  <SheetTitle>Focus History</SheetTitle>
+                  <SheetDescription>
+                    Your focus session statistics
+                  </SheetDescription>
+                </SheetHeader>
+                
+                <div className="py-6">
+                  <Tabs defaultValue="chart">
+                    <TabsList className="w-full grid grid-cols-2 mb-4">
+                      <TabsTrigger value="chart">Chart</TabsTrigger>
+                      <TabsTrigger value="history">History</TabsTrigger>
                     </TabsList>
-                    <TabsContent value="today">
-                      <ul className="space-y-2 mt-2">
-                        {focusSessions
-                          .filter(session => session.date === format(new Date(), 'yyyy-MM-dd'))
-                          .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-                          .slice(0, 5)
-                          .map((session, index) => (
-                            <li key={index} className="text-sm p-2 bg-muted/20 rounded-md">
-                              <div className="flex justify-between">
-                                <span>
-                                  {session.startTime.substring(0, 5)}
-                                </span>
-                                <span>
-                                  {session.focusDuration} min
-                                </span>
-                              </div>
-                              {session.tag && (
-                                <div className="text-xs text-muted-foreground mt-1">
-                                  {session.tag}
-                                </div>
-                              )}
-                            </li>
-                          ))}
-                      </ul>
+                    
+                    <TabsContent value="chart">
+                      <div className="h-80">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <AreaChart
+                            data={generateSessionStats()}
+                            margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
+                          >
+                            <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
+                            <XAxis dataKey="day" />
+                            <YAxis />
+                            <Tooltip 
+                              contentStyle={{ 
+                                backgroundColor: themeMode === 'dark' ? '#1f1f1f' : '#ffffff',
+                                borderColor: themeMode === 'dark' ? '#2d2d2d' : '#e2e8f0'
+                              }} 
+                              formatter={(value) => [`${value} min`, 'Focus Time']}
+                            />
+                            <Area 
+                              type="monotone" 
+                              dataKey="minutes" 
+                              name="Minutes"
+                              stroke="#8884d8" 
+                              fill="#8884d8" 
+                              fillOpacity={0.2}
+                            />
+                          </AreaChart>
+                        </ResponsiveContainer>
+                        
+                        <div className="mt-4 text-center text-sm text-muted-foreground">
+                          <p>Total focus time this week: {
+                            focusSessions.reduce((total, session) => total + session.duration, 0)
+                          } minutes</p>
+                        </div>
+                      </div>
                     </TabsContent>
-                    <TabsContent value="all">
-                      <ul className="space-y-2 mt-2">
-                        {focusSessions
-                          .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-                          .slice(0, 5)
-                          .map((session, index) => (
-                            <li key={index} className="text-sm p-2 bg-muted/20 rounded-md">
-                              <div className="flex justify-between">
-                                <span>
-                                  {format(new Date(session.date), 'MMM dd')}
-                                </span>
-                                <span>
-                                  {session.focusDuration} min
-                                </span>
-                              </div>
-                              {session.tag && (
-                                <div className="text-xs text-muted-foreground mt-1">
-                                  {session.tag}
+                    
+                    <TabsContent value="history">
+                      <h3 className="text-lg font-medium mb-2">Recent Sessions</h3>
+                      
+                      <ScrollArea className="h-72">
+                        {focusSessions.length > 0 ? (
+                          focusSessions
+                            .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                            .map((session) => (
+                              <div key={session.id} className="py-2">
+                                <div className="flex justify-between items-center">
+                                  <div>
+                                    <p className="text-sm font-medium">
+                                      {session.duration} minutes
+                                    </p>
+                                    <p className="text-xs text-muted-foreground">
+                                      {format(new Date(session.date), 'MMM d, yyyy - h:mm a')}
+                                    </p>
+                                  </div>
+                                  <div className="text-xs font-medium px-2 py-1 rounded-full bg-primary/10">
+                                    {session.type}
+                                  </div>
                                 </div>
-                              )}
-                            </li>
-                          ))}
-                      </ul>
+                                <Separator className="mt-2" />
+                              </div>
+                            ))
+                        ) : (
+                          <p className="text-center py-8 text-muted-foreground">
+                            No focus sessions recorded yet
+                          </p>
+                        )}
+                      </ScrollArea>
                     </TabsContent>
                   </Tabs>
-                ) : (
-                  <div className="text-center p-4 text-muted-foreground">
-                    <p>No sessions yet</p>
-                    <p className="text-sm">Complete a focus timer to see it here</p>
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
+                </div>
+              </SheetContent>
+            </Sheet>
+          </div>
         </div>
+        
+        <Card className="max-w-md mx-auto">
+          <CardHeader className="pb-2 text-center">
+            <CardTitle className={`text-2xl ${timerMode === 'focus' ? 'text-primary' : 'text-teal-500'}`}>
+              {timerMode === 'focus' ? 'Focus Time' : 'Break Time'}
+            </CardTitle>
+            <CardDescription>
+              Session {currentSession} / {timerMode === 'focus' ? 'Focus' : (
+                currentSession % pomodoroSettings.sessionsBeforeLongBreak === 0 ? 'Long Break' : 'Break'
+              )}
+            </CardDescription>
+          </CardHeader>
+          
+          <CardContent className="flex flex-col items-center py-6">
+            <div className="text-6xl font-bold mb-6">
+              {formatTime(timeLeft)}
+            </div>
+            
+            <Progress value={progressPercent} className="h-2 w-full mb-6" />
+            
+            <div className="flex items-center justify-center space-x-4">
+              <Button 
+                variant="outline" 
+                size="icon"
+                onClick={resetTimer}
+              >
+                <RotateCcw className="h-5 w-5" />
+              </Button>
+              
+              <Button 
+                variant="default"
+                size="lg"
+                className="px-8"
+                onClick={() => setTimerRunning(!isTimerRunning)}
+              >
+                {isTimerRunning ? (
+                  <Pause className="h-5 w-5 mr-2" />
+                ) : (
+                  <Play className="h-5 w-5 mr-2" />
+                )}
+                {isTimerRunning ? 'Pause' : 'Start'}
+              </Button>
+              
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={startNextSession}
+              >
+                <div className="text-xs">Skip</div>
+              </Button>
+            </div>
+          </CardContent>
+          
+          <CardFooter className="pt-0 text-center justify-center text-sm text-muted-foreground">
+            {timerMode === 'focus' 
+              ? `Stay focused for ${pomodoroSettings.focusDuration} minutes` 
+              : `Take a ${timerMode === 'break' && currentSession % pomodoroSettings.sessionsBeforeLongBreak === 0
+                  ? 'long break' 
+                  : 'short break'} for ${timerMode === 'break' && currentSession % pomodoroSettings.sessionsBeforeLongBreak === 0
+                    ? pomodoroSettings.longBreakDuration
+                    : pomodoroSettings.breakDuration} minutes`}
+          </CardFooter>
+        </Card>
       </div>
     </div>
   );

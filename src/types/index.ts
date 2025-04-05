@@ -1,4 +1,3 @@
-
 export type Task = {
   id: string;
   title: string;
@@ -22,6 +21,8 @@ export type FocusSession = {
   breakDuration: number; // in minutes
   completedPomodoros: number;
   tag?: string;
+  duration?: number; // Adding this field to fix the errors
+  type?: string; // Adding this field to fix the error in FocusTimer.tsx
 };
 
 export type ExpenseCategory = 

@@ -1,4 +1,3 @@
-
 import { useState } from 'react';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAppStore } from '@/store';
@@ -11,7 +10,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
 import { Skeleton } from '@/components/ui/skeleton';
 
-// Mock data for the dashboard
 const mockPerformanceData = [
   { day: 'Mon', focus: 3.5, tasks: 7, expenses: 15 },
   { day: 'Tue', focus: 2, tasks: 5, expenses: 25 },
@@ -32,31 +30,25 @@ const Dashboard = () => {
     themeMode 
   } = useAppStore();
 
-  // Get today's date
   const today = new Date();
   const formattedDate = format(today, 'EEEE, MMMM d, yyyy');
   
-  // Get the current week
   const startOfCurrentWeek = startOfWeek(today, { weekStartsOn: 1 });
   const endOfCurrentWeek = endOfWeek(today, { weekStartsOn: 1 });
   
-  // Filter tasks for today
   const todayTasks = tasks.filter(task => {
     const taskDate = parseISO(task.date);
     return isSameDay(taskDate, today);
   });
   
-  // Filter tasks for this week
   const weekTasks = tasks.filter(task => {
     const taskDate = parseISO(task.date);
     return taskDate >= startOfCurrentWeek && taskDate <= endOfCurrentWeek;
   });
   
-  // Count completed tasks
   const completedTodayTasks = todayTasks.filter(task => task.completed).length;
   const completedWeekTasks = weekTasks.filter(task => task.completed).length;
   
-  // Calculate completion rates
   const todayCompletionRate = todayTasks.length > 0 
     ? Math.round((completedTodayTasks / todayTasks.length) * 100) 
     : 0;
@@ -65,29 +57,26 @@ const Dashboard = () => {
     ? Math.round((completedWeekTasks / weekTasks.length) * 100) 
     : 0;
   
-  // Calculate focus time for today and this week
   const todayFocusMinutes = focusSessions
     .filter(session => {
       const sessionDate = new Date(session.date);
       return isSameDay(sessionDate, today);
     })
-    .reduce((total, session) => total + session.duration, 0);
+    .reduce((total, session) => total + (session.duration || session.focusDuration), 0);
     
   const weekFocusMinutes = focusSessions
     .filter(session => {
       const sessionDate = new Date(session.date);
       return sessionDate >= startOfCurrentWeek && sessionDate <= endOfCurrentWeek;
     })
-    .reduce((total, session) => total + session.duration, 0);
+    .reduce((total, session) => total + (session.duration || session.focusDuration), 0);
     
-  // Format focus time
   const formatFocusTime = (minutes: number) => {
     const hours = Math.floor(minutes / 60);
     const mins = minutes % 60;
     return `${hours}h ${mins}m`;
   };
   
-  // Calculate expenses for today and this week
   const todayExpenses = transactions
     .filter(transaction => {
       const transactionDate = new Date(transaction.date);
@@ -110,7 +99,6 @@ const Dashboard = () => {
         : total;
     }, 0);
     
-  // Calculate income for today and this week
   const todayIncome = transactions
     .filter(transaction => {
       const transactionDate = new Date(transaction.date);
@@ -133,7 +121,6 @@ const Dashboard = () => {
         : total;
     }, 0);
     
-  // Quick actions for the dashboard
   const quickActions = [
     { 
       title: 'New Task', 
@@ -160,16 +147,13 @@ const Dashboard = () => {
   return (
     <div className="container max-w-6xl mx-auto py-6">
       <div className="flex flex-col gap-6">
-        {/* Header */}
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold">Dashboard</h1>
             <p className="text-muted-foreground">{formattedDate}</p>
           </div>
-          {/* Settings link removed to fix error */}
         </div>
         
-        {/* Quick Actions */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {quickActions.map((action, index) => (
             <Card 
@@ -187,7 +171,6 @@ const Dashboard = () => {
           ))}
         </div>
         
-        {/* Daily Summary */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <Card>
             <CardHeader className="pb-2">
@@ -264,7 +247,6 @@ const Dashboard = () => {
           </Card>
         </div>
         
-        {/* Weekly Overview */}
         <Card>
           <CardHeader>
             <CardTitle>Weekly Overview</CardTitle>
